@@ -1,12 +1,13 @@
 [package]
 name = "hubber_xml"
-version = "0.1.0"
+version = "0.0.2"
 authors = ["Alexander Koval <kovalidis@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+structopt = "0.3"
 quick-xml = "0.17.2"
 failure = "0.1.6"
 diesel = { version = "1.4.3", features = ["mysql"] }

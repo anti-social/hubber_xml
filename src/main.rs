@@ -1,8 +1,7 @@
 #[macro_use] extern crate failure;
 use failure::Error;
 
-#[macro_use]
-extern crate diesel;
+#[macro_use] extern crate diesel;
 use diesel::prelude::*;
 use diesel::mysql::MysqlConnection;
 
@@ -11,7 +10,9 @@ use dotenv;
 use log::{error, info, warn, LevelFilter};
 
 use std::env;
-use std::path::Path;
+use std::path::PathBuf;
+
+use structopt::StructOpt;
 
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -21,6 +22,17 @@ mod schema;
 
 use schema::products;
 use std::collections::HashMap;
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "hubber_xml")]
+struct Opts {
+    /// Do not modify database
+    #[structopt(long)]
+    dry_run: bool,
+    /// XML file path to process
+    #[structopt(name = "FILE_PATH", parse(from_os_str))]
+    file_path: PathBuf,
+}
 
 #[derive(Default, Debug)]
 struct ProcessedStat {
@@ -36,15 +48,11 @@ fn main() -> Result<(), Error> {
         .filter(None, LevelFilter::Info)
         .init();
 
-    let args: Vec<String> = env::args().collect();
-    let file_path = match args.get(1) {
-        Some(p) => Path::new(p),
-        None => return Err(format_err!("Expected exactly 1 argument: FILE_PATH")),
-    };
+    let opts = Opts::from_args();
 
     let conn = establish_connection();
 
-    let stat = process_offers(file_path, &conn)?;
+    let stat = process_offers(&opts, &conn)?;
     info!("{:?}", stat);
 
     Ok(())
@@ -108,8 +116,10 @@ enum OfferFields {
     VendorCode,
 }
 
-fn process_offers(path: &Path, conn: &MysqlConnection) -> Result<ProcessedStat, Error> {
-    let mut xml_reader = Reader::from_file(path)?;
+fn process_offers(
+    opts: &Opts, conn: &MysqlConnection,
+) -> Result<ProcessedStat, Error> {
+    let mut xml_reader = Reader::from_file(opts.file_path.as_path())?;
     let mut buf = vec!();
     let mut offer_buf = vec!();
     let mut stat = ProcessedStat::default();
@@ -259,7 +269,9 @@ fn process_offers(path: &Path, conn: &MysqlConnection) -> Result<ProcessedStat, 
                             stat.ignored_offers += 1;
                         }
                         if products_bucket.len() == 1000 {
-                            let (updated_count, inserted_count) = process_products_chunk(conn, &products_bucket)?;
+                            let (updated_count, inserted_count) = process_products_chunk(
+                                conn, &products_bucket, opts.dry_run
+                            )?;
                             stat.updated_products += updated_count;
                             stat.inserted_products += inserted_count;
                             products_bucket.clear();
@@ -312,7 +324,9 @@ fn convert_offer_to_product(offer: Offer) -> Option<models::NewProduct> {
 }
 
 fn process_products_chunk(
-    conn: &MysqlConnection, parsed_products: &Vec<models::NewProduct>
+    conn: &MysqlConnection,
+    parsed_products: &Vec<models::NewProduct>,
+    dry_run: bool
 ) -> Result<(u32, u32), Error> {
     use schema::products::dsl::{products as products_table};
 
@@ -345,9 +359,11 @@ fn process_products_chunk(
                 }
                 if should_update {
                     // println!("Updating product with offer_id={}: {:?}", p.offer_id, update_product);
-                    diesel::update(schema::products::table.find(found_product.id))
-                        .set(&update_product)
-                        .execute(conn)?;
+                    if !dry_run {
+                        diesel::update(schema::products::table.find(found_product.id))
+                            .set(&update_product)
+                            .execute(conn)?;
+                    }
                     updated_count += 1;
                 }
             }
@@ -360,9 +376,11 @@ fn process_products_chunk(
         .collect::<Vec<_>>();
     inserted_count += insert_products.len();
     if !insert_products.is_empty() {
-        diesel::insert_into(products::table)
-            .values(insert_products)
-            .execute(conn)?;
+        if !dry_run {
+            diesel::insert_into(products::table)
+                .values(insert_products)
+                .execute(conn)?;
+        }
     }
     Ok((updated_count, inserted_count as u32))
 }
