@@ -45,6 +45,6 @@ CREATE TABLE products (
   KEY prom_cat_id (prom_cat_id) USING BTREE,
   KEY force_rk_type (force_rk_type) USING BTREE,
   KEY source_id (source_id) USING BTREE,
-  KEY name_2 (name), FULLTEXT KEY name (name),
+  KEY name_2 (name), FULLTEXT KEY name (name)
   -- CONSTRAINT products_ibfk_1 FOREIGN KEY (vendor_id) REFERENCES product_vendors (id)
 ) ENGINE=InnoDB AUTO_INCREMENT=1249524 DEFAULT CHARSET=utf8;
