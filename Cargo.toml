@@ -1,0 +1,13 @@
+[package]
+name = "hubber_xml"
+version = "0.1.0"
+authors = ["Alexander Koval <kovalidis@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+quick-xml = "0.17.2"
+failure = "0.1.6"
+diesel = { version = "1.4.3", features = ["postgres"] }
+dotenv = "0.9.0"
