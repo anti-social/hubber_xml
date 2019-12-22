@@ -26,9 +26,15 @@ use std::collections::HashMap;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "hubber_xml")]
 struct Opts {
-    /// Do not modify database
+    /// Update price, oldprice and currencyId fields
     #[structopt(long)]
-    dry_run: bool,
+    update_price: bool,
+    /// Update available field
+    #[structopt(long)]
+    update_available: bool,
+    /// Create new products
+    #[structopt(long)]
+    insert_new: bool,
     /// XML file path to process
     #[structopt(name = "FILE_PATH", parse(from_os_str))]
     file_path: PathBuf,
@@ -39,7 +45,8 @@ struct ProcessedStat {
     pub total_offers: u32,
     pub ignored_offers: u32,
     pub parsed_offers: u32,
-    pub updated_products: u32,
+    pub updated_price: u32,
+    pub updated_available: u32,
     pub inserted_products: u32,
 }
 
@@ -53,7 +60,24 @@ fn main() -> Result<(), Error> {
     let conn = establish_connection();
 
     let stat = process_offers(&opts, &conn)?;
-    info!("{:?}", stat);
+    println!("Total offers: {}", stat.total_offers);
+    println!("Ignored offers (with errors or missing required fields): {}", stat.ignored_offers);
+    println!("Parsed offers: {}", stat.parsed_offers);
+    if opts.update_price {
+        println!("Updated price: {}", stat.updated_price);
+    } else {
+        println!("Different price: {}", stat.updated_price);
+    }
+    if opts.update_available {
+        println!("Updated available: {}", stat.updated_available);
+    } else {
+        println!("Different available: {}", stat.updated_available);
+    }
+    if opts.insert_new {
+        println!("Inserted products: {}", stat.inserted_products);
+    } else {
+        println!("New products: {}", stat.inserted_products);
+    }
 
     Ok(())
 }
@@ -269,13 +293,13 @@ fn process_offers(
                             stat.ignored_offers += 1;
                         }
                         if products_bucket.len() == 1000 {
-                            let (updated_count, inserted_count) = process_products_chunk(
-                                conn, &products_bucket, opts.dry_run
+                            let processed_products_stat = process_products_chunk(
+                                conn, &products_bucket, opts
                             )?;
-                            stat.updated_products += updated_count;
-                            stat.inserted_products += inserted_count;
+                            stat.updated_price += processed_products_stat.updated_price;
+                            stat.updated_available += processed_products_stat.updated_available;
+                            stat.inserted_products += processed_products_stat.inserted;
                             products_bucket.clear();
-
                         }
                     }
                     _ => {}
@@ -290,6 +314,15 @@ fn process_offers(
             }
             _ => {}
         }
+    }
+
+    if !products_bucket.is_empty() {
+        let processed_products_stat = process_products_chunk(
+            conn, &products_bucket, opts
+        )?;
+        stat.updated_price += processed_products_stat.updated_price;
+        stat.updated_available += processed_products_stat.updated_available;
+        stat.inserted_products += processed_products_stat.inserted;
     }
 
     Ok(stat)
@@ -323,15 +356,19 @@ fn convert_offer_to_product(offer: Offer) -> Option<models::NewProduct> {
     })
 }
 
+#[derive(Default)]
+struct ProcessedProducts {
+    pub updated_price: u32,
+    pub updated_available: u32,
+    pub inserted: u32,
+}
+
 fn process_products_chunk(
     conn: &MysqlConnection,
     parsed_products: &Vec<models::NewProduct>,
-    dry_run: bool
-) -> Result<(u32, u32), Error> {
+    opts: &Opts
+) -> Result<ProcessedProducts, Error> {
     use schema::products::dsl::{products as products_table};
-
-    let mut updated_count = 0;
-    let mut inserted_count = 0;
 
     let offer_ids = parsed_products.iter()
         .map(|p| p.offer_id.as_str())
@@ -343,28 +380,36 @@ fn process_products_chunk(
         .map(|p| (p.offer_id.as_str(), p))
         .collect::<HashMap<_, _>>();
 
+    let mut processed_products_stat = ProcessedProducts::default();
     for p in parsed_products {
         match offer_id_to_found_product.get(p.offer_id.as_str()) {
             Some(found_product) => {
                 let mut should_update = false;
                 let mut update_product = models::ModProduct::default();
                 if p.available != found_product.available {
-                    update_product.available = Some(p.available.as_ref());
-                    should_update = true;
+                    processed_products_stat.updated_available += 1;
+                    if opts.update_available {
+                        update_product.available = Some(p.available.as_ref());
+                        should_update = true;
+                    }
                 }
-                if p.price != found_product.price || p.currencyId != found_product.currencyId {
-                    update_product.price = Some(&p.price);
-                    update_product.currencyId = Some(p.currencyId.as_deref());
-                    should_update = true;
+                if p.price != found_product.price ||
+                    p.oldprice != found_product.oldprice ||
+                    p.currencyId != found_product.currencyId
+                {
+                    processed_products_stat.updated_price += 1;
+                    if opts.update_price {
+                        update_product.price = Some(&p.price);
+                        update_product.oldprice = Some(p.oldprice.as_ref());
+                        update_product.currencyId = Some(p.currencyId.as_deref());
+                        should_update = true;
+                    }
                 }
                 if should_update {
                     // println!("Updating product with offer_id={}: {:?}", p.offer_id, update_product);
-                    if !dry_run {
-                        diesel::update(schema::products::table.find(found_product.id))
-                            .set(&update_product)
-                            .execute(conn)?;
-                    }
-                    updated_count += 1;
+                    diesel::update(schema::products::table.find(found_product.id))
+                        .set(&update_product)
+                        .execute(conn)?;
                 }
             }
             None => {}
@@ -374,13 +419,13 @@ fn process_products_chunk(
     let insert_products = parsed_products.iter()
         .filter(|&p| !offer_id_to_found_product.contains_key(p.offer_id.as_str()))
         .collect::<Vec<_>>();
-    inserted_count += insert_products.len();
+    processed_products_stat.inserted += insert_products.len() as u32;
     if !insert_products.is_empty() {
-        if !dry_run {
+        if opts.insert_new {
             diesel::insert_into(products::table)
                 .values(insert_products)
                 .execute(conn)?;
         }
     }
-    Ok((updated_count, inserted_count as u32))
+    Ok(processed_products_stat)
 }
