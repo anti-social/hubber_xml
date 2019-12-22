@@ -11,6 +11,7 @@ use log::{error, info, warn, LevelFilter};
 
 use std::env;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use structopt::StructOpt;
 
@@ -48,6 +49,8 @@ struct ProcessedStat {
     pub updated_price: u32,
     pub updated_available: u32,
     pub inserted_products: u32,
+    pub total_duration: Duration,
+    pub parse_duration: Duration,
 }
 
 fn main() -> Result<(), Error> {
@@ -78,6 +81,8 @@ fn main() -> Result<(), Error> {
     } else {
         println!("New products: {}", stat.inserted_products);
     }
+    println!("Total time: {:?}", stat.total_duration);
+    println!("Parse time: {:?}", stat.parse_duration);
 
     Ok(())
 }
@@ -143,6 +148,8 @@ enum OfferFields {
 fn process_offers(
     opts: &Opts, conn: &MysqlConnection,
 ) -> Result<ProcessedStat, Error> {
+    let start_processing_at = Instant::now();
+    let mut total_sync_duration = Duration::default();
     let mut xml_reader = Reader::from_file(opts.file_path.as_path())?;
     let mut buf = vec!();
     let mut offer_buf = vec!();
@@ -293,12 +300,13 @@ fn process_offers(
                             stat.ignored_offers += 1;
                         }
                         if products_bucket.len() == 1000 {
-                            let processed_products_stat = process_products_chunk(
+                            let processed_products_stat = sync_products_chunk(
                                 conn, &products_bucket, opts
                             )?;
                             stat.updated_price += processed_products_stat.updated_price;
                             stat.updated_available += processed_products_stat.updated_available;
                             stat.inserted_products += processed_products_stat.inserted;
+                            total_sync_duration += processed_products_stat.duration;
                             products_bucket.clear();
                         }
                     }
@@ -317,13 +325,17 @@ fn process_offers(
     }
 
     if !products_bucket.is_empty() {
-        let processed_products_stat = process_products_chunk(
+        let processed_products_stat = sync_products_chunk(
             conn, &products_bucket, opts
         )?;
         stat.updated_price += processed_products_stat.updated_price;
         stat.updated_available += processed_products_stat.updated_available;
         stat.inserted_products += processed_products_stat.inserted;
+        total_sync_duration += processed_products_stat.duration;
     }
+
+    stat.total_duration = start_processing_at.elapsed();
+    stat.parse_duration = stat.total_duration - total_sync_duration;
 
     Ok(stat)
 }
@@ -361,14 +373,17 @@ struct ProcessedProducts {
     pub updated_price: u32,
     pub updated_available: u32,
     pub inserted: u32,
+    pub duration: Duration,
 }
 
-fn process_products_chunk(
+fn sync_products_chunk(
     conn: &MysqlConnection,
     parsed_products: &Vec<models::NewProduct>,
     opts: &Opts
 ) -> Result<ProcessedProducts, Error> {
     use schema::products::dsl::{products as products_table};
+
+    let start_syncing_at = Instant::now();
 
     let offer_ids = parsed_products.iter()
         .map(|p| p.offer_id.as_str())
@@ -427,5 +442,8 @@ fn process_products_chunk(
                 .execute(conn)?;
         }
     }
+
+    processed_products_stat.duration += start_syncing_at.elapsed();
+
     Ok(processed_products_stat)
 }
