@@ -10,9 +10,13 @@ use diesel::mysql::MysqlConnection;
 
 use dotenv;
 
+use indicatif::{ProgressBar, ProgressStyle};
+
 use log::{error, info, warn, LevelFilter};
 
+use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -25,7 +29,6 @@ mod models;
 mod schema;
 
 use schema::products;
-use std::collections::HashMap;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "hubber_xml")]
@@ -39,6 +42,9 @@ struct Opts {
     /// Create new products
     #[structopt(long)]
     insert_new: bool,
+    /// Do not render progress bar
+    #[structopt(long)]
+    no_progress: bool,
     /// XML file path to process
     #[structopt(name = "FILE_PATH", parse(from_os_str))]
     file_path: PathBuf,
@@ -153,7 +159,21 @@ fn process_offers(
 ) -> Result<ProcessedStat, Error> {
     let start_processing_at = Instant::now();
     let mut total_sync_duration = Duration::default();
-    let mut xml_reader = Reader::from_file(opts.file_path.as_path())?;
+    let file_path = opts.file_path.as_path();
+    let file_size = fs::metadata(file_path)?.len();
+    let update_progress_after_chunk = file_size / 100;
+    let progress_bar = if !opts.no_progress {
+        let pb = ProgressBar::new(file_size);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                .progress_chars("#>-")
+        );
+        Some(pb)
+    } else {
+        None
+    };
+    let mut xml_reader = Reader::from_file(file_path)?;
     let mut buf = vec!();
     let mut offer_buf = vec!();
     let mut stat = ProcessedStat::default();
@@ -325,6 +345,13 @@ fn process_offers(
             }
             _ => {}
         }
+
+        if let Some(ref pb) = progress_bar {
+            let cur_file_position = xml_reader.buffer_position() as u64;
+            if cur_file_position > pb.position() + update_progress_after_chunk {
+                pb.set_position(cur_file_position);
+            }
+        };
     }
 
     if !products_bucket.is_empty() {
@@ -339,6 +366,9 @@ fn process_offers(
 
     stat.total_duration = start_processing_at.elapsed();
     stat.parse_duration = stat.total_duration - total_sync_duration;
+    if let Some(ref pb) = progress_bar {
+        pb.finish();
+    };
 
     Ok(stat)
 }
