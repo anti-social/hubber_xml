@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "hubber_xml"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "chrono 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel 1.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
