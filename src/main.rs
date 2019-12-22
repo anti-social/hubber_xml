@@ -1,3 +1,6 @@
+extern crate chrono;
+use chrono::prelude::*;
+
 #[macro_use] extern crate failure;
 use failure::Error;
 
@@ -422,6 +425,8 @@ fn sync_products_chunk(
                 }
                 if should_update {
                     // println!("Updating product with offer_id={}: {:?}", p.offer_id, update_product);
+                    let date_modified = Utc::now().naive_utc();
+                    update_product.renew_date = Some(Some(&date_modified));
                     diesel::update(schema::products::table.find(found_product.id))
                         .set(&update_product)
                         .execute(conn)?;

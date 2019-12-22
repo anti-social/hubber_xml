@@ -24,6 +24,7 @@ pub struct Product {
     pub currencyId: Option<String>,
     pub available: Option<i8>,
     pub description: Option<String>,
+    pub renew_data: Option<chrono::NaiveDateTime>,
 }
 
 #[derive(AsChangeset, Default, Debug)]
@@ -33,6 +34,7 @@ pub struct ModProduct<'a> {
     pub price: Option<&'a f32>,
     pub oldprice: Option<Option<&'a f32>>,
     pub currencyId: Option<Option<&'a str>>,
+    pub renew_date: Option<Option<&'a chrono::NaiveDateTime>>,
 //    pub categoryId: Option<&'a i32>,
 //    pub name: Option<&'a str>,
 //    pub oldprice: Option<&'a Option<f32>>,

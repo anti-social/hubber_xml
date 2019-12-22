@@ -11,7 +11,7 @@ table! {
         description -> Nullable<Mediumtext>,
 //        hub_stock_id -> Nullable<Varchar>,
 //        vendorCode -> Nullable<Integer>,
-//        renew_date -> Nullable<Timestamp>,
+        renew_date -> Nullable<Timestamp>,
 //        insert_date -> Nullable<Timestamp>,
 //        group_id -> Nullable<Varchar>,
 //        prom_cat_id -> Nullable<Integer>,
