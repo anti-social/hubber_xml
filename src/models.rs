@@ -1,5 +1,8 @@
 use super::schema::products;
 
+pub const AVAILABLE: i8 = 1;
+pub const NOT_AVAILABLE: i8 = 0;
+
 #[derive(Insertable)]
 #[table_name="products"]
 pub struct NewProduct {
@@ -28,6 +31,11 @@ pub struct Product {
     pub description: Option<String>,
     pub renew_data: Option<chrono::NaiveDateTime>,
 }
+
+//#[derive(QueryableByName)]
+//pub struct ProductHubStockIdOnly {
+//    pub hub_stock_id: String,
+//}
 
 #[derive(AsChangeset, Default, Debug)]
 #[table_name="products"]

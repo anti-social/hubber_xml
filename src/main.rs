@@ -5,6 +5,7 @@ use chrono::prelude::*;
 use failure::{Error, ResultExt};
 
 #[macro_use] extern crate diesel;
+use diesel::sql_query;
 use diesel::prelude::*;
 use diesel::mysql::MysqlConnection;
 
@@ -14,7 +15,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use log::{error, info, warn, LevelFilter};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -30,7 +31,10 @@ use url::Url;
 mod models;
 mod schema;
 
+use models::{AVAILABLE, NOT_AVAILABLE};
 use schema::products;
+
+const CHUNK_SIZE: usize = 1000;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "hubber_xml")]
@@ -44,6 +48,9 @@ struct Opts {
     /// Create new products
     #[structopt(long)]
     insert_new: bool,
+    /// Mark products that not in file as unavailable
+    #[structopt(long)]
+    mark_missing_unavailable: bool,
     /// Do not render progress bar
     #[structopt(long)]
     no_progress: bool,
@@ -60,6 +67,7 @@ struct ProcessedStat {
     pub updated_price: u32,
     pub updated_available: u32,
     pub inserted_products: u32,
+    pub marked_as_unavailable: u32,
     pub total_duration: Duration,
     pub parse_duration: Duration,
 }
@@ -91,6 +99,9 @@ fn main() -> Result<(), Error> {
         println!("Inserted products: {}", stat.inserted_products);
     } else {
         println!("New products: {}", stat.inserted_products);
+    }
+    if opts.mark_missing_unavailable {
+        println!("Marked as unavailable: {}", stat.marked_as_unavailable);
     }
     println!("Total time: {:?}", stat.total_duration);
     println!("Parse time: {:?}", stat.parse_duration);
@@ -185,6 +196,7 @@ fn process_offers(
     let mut stat = ProcessedStat::default();
 
     let mut products_bucket = vec!();
+    let mut all_offer_ids = HashSet::new();
 
     loop {
         match xml_reader.read_event(&mut buf) {
@@ -319,10 +331,15 @@ fn process_offers(
                                 }
                                 _ => {}
                             }
+
+                            offer_buf.clear();
                         }
 
                         stat.total_offers += 1;
                         if let Some(product) = convert_offer_to_product(offer) {
+                            if opts.mark_missing_unavailable {
+                                all_offer_ids.insert(product.offer_id.clone());
+                            }
                             products_bucket.push(product);
                             stat.parsed_offers += 1;
                         } else {
@@ -352,6 +369,8 @@ fn process_offers(
             _ => {}
         }
 
+        buf.clear();
+
         if let Some(ref pb) = progress_bar {
             let cur_file_position = xml_reader.buffer_position() as u64;
             if cur_file_position > pb.position() + update_progress_after_chunk {
@@ -370,11 +389,16 @@ fn process_offers(
         total_sync_duration += processed_products_stat.duration;
     }
 
-    stat.total_duration = start_processing_at.elapsed();
-    stat.parse_duration = stat.total_duration - total_sync_duration;
     if let Some(ref pb) = progress_bar {
         pb.finish();
     };
+
+    if opts.mark_missing_unavailable {
+        stat.marked_as_unavailable = mark_missing_as_unavailable(conn, &all_offer_ids, opts)?;
+    }
+
+    stat.total_duration = start_processing_at.elapsed();
+    stat.parse_duration = stat.total_duration - total_sync_duration;
 
     Ok(stat)
 }
@@ -496,4 +520,75 @@ fn sync_products_chunk(
     processed_products_stat.duration += start_syncing_at.elapsed();
 
     Ok(processed_products_stat)
+}
+
+fn mark_missing_as_unavailable(
+    conn: &MysqlConnection,
+    all_offer_ids: &HashSet<String>,
+    opts: &Opts,
+) -> Result<u32, Error> {
+    use schema::products::dsl;
+
+    let mut last_product_id = 0;
+    let mut missing_offer_ids = Vec::with_capacity(CHUNK_SIZE);
+    let mut marked_count: u32 = 0;
+
+    let progress = if !opts.no_progress {
+        let total_products = dsl::products.select(dsl::id)
+            .filter(dsl::available.eq(AVAILABLE))
+            .count()
+            .get_result::<i64>(conn)? as u64;
+        let pb = ProgressBar::new(total_products);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:6} ({eta})")
+        );
+        Some((pb, total_products / 100))
+    } else {
+        None
+    };
+
+    let mut total_processed: u64 = 0;
+    loop {
+        let db_offers = dsl::products.select((dsl::id, dsl::hub_stock_id))
+            .filter(dsl::id.gt(last_product_id))
+            .filter(dsl::available.eq(AVAILABLE))
+            .order(dsl::id)
+            .limit(CHUNK_SIZE as i64)
+            .load::<(i32, Option<String>)>(conn)?;
+
+        if db_offers.is_empty() {
+            break;
+        }
+
+        total_processed += db_offers.len() as u64;
+        last_product_id = db_offers.last().unwrap().0;
+
+        for (_, db_offer_id) in db_offers {
+            if let Some(db_offer_id) = db_offer_id {
+                if !all_offer_ids.contains(&db_offer_id) {
+                    missing_offer_ids.push(db_offer_id);
+                }
+            }
+        }
+        if !missing_offer_ids.is_empty() {
+            diesel::update(dsl::products.filter(dsl::hub_stock_id.eq_any(&missing_offer_ids)))
+                .set(dsl::available.eq(NOT_AVAILABLE))
+                .execute(conn)?;
+            marked_count += missing_offer_ids.len() as u32;
+            missing_offer_ids.clear();
+        }
+
+        if let Some((ref pb, update_after_count)) = progress {
+            if pb.position() + update_after_count < total_processed {
+                pb.set_position(total_processed);
+            }
+        }
+    }
+
+    if let Some((pb, _)) = progress {
+        pb.finish();
+    }
+
+    Ok(marked_count)
 }
