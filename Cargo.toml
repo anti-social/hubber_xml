@@ -1,6 +1,6 @@
 [package]
 name = "hubber_xml"
-version = "0.0.5"
+version = "0.0.6"
 authors = ["Alexander Koval <kovalidis@gmail.com>"]
 edition = "2018"
 
