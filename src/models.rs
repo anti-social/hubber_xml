@@ -18,7 +18,7 @@ pub struct NewProduct {
     pub description: Option<String>,
 }
 
-#[derive(Queryable)]
+#[derive(Queryable, Debug)]
 pub struct Product {
     pub id: i32,
     pub offer_id: String,
@@ -45,7 +45,7 @@ pub struct ModProduct<'a> {
     pub price: Option<&'a f32>,
     pub oldprice: Option<Option<&'a f32>>,
     pub currencyId: Option<Option<&'a str>>,
-    pub renew_date: Option<Option<&'a chrono::NaiveDateTime>>,
+    pub renew_date: Option<&'a chrono::NaiveDateTime>,
 //    pub categoryId: Option<&'a i32>,
 //    pub name: Option<&'a str>,
 //    pub oldprice: Option<&'a Option<f32>>,

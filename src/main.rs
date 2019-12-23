@@ -5,8 +5,9 @@ use chrono::prelude::*;
 use failure::{Error, ResultExt};
 
 #[macro_use] extern crate diesel;
-use diesel::prelude::*;
+use diesel::connection::SimpleConnection;
 use diesel::mysql::MysqlConnection;
+use diesel::prelude::*;
 
 use dotenv;
 
@@ -197,6 +198,8 @@ fn process_offers(
     let mut products_bucket = vec!();
     let mut all_offer_ids = HashSet::new();
 
+    let date_modified = Utc::now().naive_utc();
+
     loop {
         match xml_reader.read_event(&mut buf) {
             Ok(Event::Start(ref e)) |
@@ -283,7 +286,9 @@ fn process_offers(
                                                 "UAH" | "USD" | "EUR" | "RUB" | "BYR" | "KZT" => {
                                                     offer.currency_id = Some(value.to_string());
                                                 }
-                                                "" => {}
+                                                "" => {
+                                                    offer.currency_id = Some("UAH".to_string());
+                                                }
                                                 _ => {
                                                     warn!("{}: Unknown currencyId: {}", offer.offer_id, value);
                                                 }
@@ -346,7 +351,7 @@ fn process_offers(
                         }
                         if products_bucket.len() == 1000 {
                             let processed_products_stat = sync_products_chunk(
-                                conn, &products_bucket, opts
+                                conn, &products_bucket, opts, &date_modified
                             )?;
                             stat.updated_price += processed_products_stat.updated_price;
                             stat.updated_available += processed_products_stat.updated_available;
@@ -380,7 +385,7 @@ fn process_offers(
 
     if !products_bucket.is_empty() {
         let processed_products_stat = sync_products_chunk(
-            conn, &products_bucket, opts
+            conn, &products_bucket, opts, &date_modified
         )?;
         stat.updated_price += processed_products_stat.updated_price;
         stat.updated_available += processed_products_stat.updated_available;
@@ -442,7 +447,8 @@ struct ProcessedProducts {
 fn sync_products_chunk(
     conn: &MysqlConnection,
     parsed_products: &Vec<models::NewProduct>,
-    opts: &Opts
+    opts: &Opts,
+    date_modified: &NaiveDateTime,
 ) -> Result<ProcessedProducts, Error> {
     use schema::products::dsl::{products as products_table};
 
@@ -465,12 +471,13 @@ fn sync_products_chunk(
         })
         .collect::<HashMap<_, _>>();
 
+    let mut raw_update_queries = String::new();
     for p in parsed_products {
         match offer_id_to_found_product.get(p.hub_stock_id.as_str()) {
             Some(found_product) => {
                 let mut should_update = false;
                 let mut update_product = models::ModProduct::default();
-                if p.available != found_product.available.unwrap_or(NOT_AVAILABLE) {
+                if Some(p.available) != found_product.available {
                     processed_products_stat.updated_available += 1;
                     if opts.update_available {
                         update_product.available = Some(&p.available);
@@ -491,15 +498,43 @@ fn sync_products_chunk(
                 }
                 if should_update {
                     // println!("Updating product with offer_id={}: {:?}", p.offer_id, update_product);
-                    let date_modified = Utc::now().naive_utc();
-                    update_product.renew_date = Some(Some(&date_modified));
-                    diesel::update(schema::products::table.find(found_product.id))
-                        .set(&update_product)
-                        .execute(conn)?;
+                    raw_update_queries.push_str("UPDATE `products` SET ");
+                    if let Some(available) = update_product.available {
+                        raw_update_queries.push_str(
+                            &format!("`available` = {}, ", available.to_string())
+                        );
+                    }
+                    if let Some(price) = update_product.price {
+                        raw_update_queries.push_str(
+                            &format!("`price` = {}, ", price.to_string())
+                        );
+                    }
+                    if let Some(oldprice) = update_product.oldprice {
+                        raw_update_queries.push_str(
+                            &format!("`oldprice` = {}, ", optional_to_sql(oldprice))
+                        );
+                    }
+                    if let Some(currency_id) = update_product.currencyId {
+                        raw_update_queries.push_str(
+                            &format!("`currencyId` = {}", optional_string_to_sql(currency_id))
+                        );
+                    }
+                    raw_update_queries.push_str(&format!(
+                        "`renew_date` = '{}' WHERE `id` = {};\n",
+                        &date_modified, found_product.id
+                    ));
+
+//                    update_product.renew_date = Some(&date_modified);
+//                    diesel::update(schema::products::table.find(found_product.id))
+//                        .set(&update_product)
+//                        .execute(conn)?;
                 }
             }
             None => {}
         }
+    }
+    if !raw_update_queries.is_empty() {
+        conn.batch_execute(&raw_update_queries)?;
     }
 
     let insert_products = parsed_products.iter()
@@ -519,6 +554,22 @@ fn sync_products_chunk(
     processed_products_stat.duration += start_syncing_at.elapsed();
 
     Ok(processed_products_stat)
+}
+
+fn optional_to_sql<T: ToString>(v: Option<&T>) -> String {
+    return if let Some(v) = v {
+        v.to_string()
+    } else {
+        "NULL".to_string()
+    }
+}
+
+fn optional_string_to_sql(s: Option<&str>) -> String {
+    return if let Some(s) = s {
+        format!("'{}'", s.replace("'", "''"))
+    } else {
+        "NULL".to_string()
+    }
 }
 
 fn mark_missing_as_unavailable(
