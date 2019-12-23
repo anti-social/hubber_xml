@@ -5,7 +5,6 @@ use chrono::prelude::*;
 use failure::{Error, ResultExt};
 
 #[macro_use] extern crate diesel;
-use diesel::sql_query;
 use diesel::prelude::*;
 use diesel::mysql::MysqlConnection;
 
@@ -131,7 +130,7 @@ pub fn fetch_product() {
 
 struct Offer {
     pub offer_id: String,
-    pub available: Option<i8>,
+    pub available: i8,
     pub price: Option<f32>,
     pub old_price: Option<f32>,
     pub currency_id: Option<String>,
@@ -143,7 +142,7 @@ struct Offer {
 }
 
 impl Offer {
-    pub fn new(offer_id: String, available: Option<i8>) -> Offer {
+    pub fn new(offer_id: String, available: i8) -> Offer {
         Offer {
             offer_id,
             available,
@@ -205,7 +204,7 @@ fn process_offers(
                 match e.name() {
                     b"offer" => {
                         let mut offer_id = None;
-                        let mut available = None;
+                        let mut available = NOT_AVAILABLE;
                         for attr_res in e.attributes() {
                             let attr = attr_res?;
                             match attr.key {
@@ -214,9 +213,9 @@ fn process_offers(
                                 }
                                 b"available" => {
                                     available = match attr.value.as_ref() {
-                                        b"" => { None }
-                                        b"true" | b"1" => { Some(1) }
-                                        b"false" | b"0" => { Some(0) }
+                                        b"" => NOT_AVAILABLE,
+                                        b"true" | b"1" => AVAILABLE,
+                                        b"false" | b"0" => NOT_AVAILABLE,
                                         v => {
                                             return Err(format_err!(
                                                 "Unknown \"available\" attribute: {}", String::from_utf8_lossy(v)
@@ -471,10 +470,10 @@ fn sync_products_chunk(
             Some(found_product) => {
                 let mut should_update = false;
                 let mut update_product = models::ModProduct::default();
-                if p.available != found_product.available {
+                if p.available != found_product.available.unwrap_or(NOT_AVAILABLE) {
                     processed_products_stat.updated_available += 1;
                     if opts.update_available {
-                        update_product.available = Some(p.available.as_ref());
+                        update_product.available = Some(&p.available);
                         should_update = true;
                     }
                 }

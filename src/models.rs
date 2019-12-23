@@ -13,7 +13,7 @@ pub struct NewProduct {
     pub price: f32,
     pub oldprice: Option<f32>,
     pub currencyId: Option<String>,
-    pub available: Option<i8>,
+    pub available: i8,
     pub description: Option<String>,
 }
 
@@ -40,7 +40,7 @@ pub struct Product {
 #[derive(AsChangeset, Default, Debug)]
 #[table_name="products"]
 pub struct ModProduct<'a> {
-    pub available: Option<Option<&'a i8>>,
+    pub available: Option<&'a i8>,
     pub price: Option<&'a f32>,
     pub oldprice: Option<Option<&'a f32>>,
     pub currencyId: Option<Option<&'a str>>,
