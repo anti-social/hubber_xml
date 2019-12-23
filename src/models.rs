@@ -4,6 +4,7 @@ use super::schema::products;
 #[table_name="products"]
 pub struct NewProduct {
     pub offer_id: String,
+    pub hub_stock_id: String,
     pub categoryId: i32,
     pub name: String,
     pub price: f32,
@@ -17,6 +18,7 @@ pub struct NewProduct {
 pub struct Product {
     pub id: i32,
     pub offer_id: String,
+    pub hub_stock_id: Option<String>,
     pub categoryId: i32,
     pub name: String,
     pub price: f32,

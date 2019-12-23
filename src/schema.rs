@@ -2,6 +2,7 @@ table! {
     products (id) {
         id -> Integer,
         offer_id -> Varchar,
+        hub_stock_id -> Nullable<Varchar>,
         categoryId -> Integer,
         name -> Varchar,
         price -> Float,
@@ -9,7 +10,6 @@ table! {
         currencyId -> Nullable<Varchar>,
         available -> Nullable<Tinyint>,
         description -> Nullable<Mediumtext>,
-//        hub_stock_id -> Nullable<Varchar>,
 //        vendorCode -> Nullable<Integer>,
         renew_date -> Nullable<Timestamp>,
 //        insert_date -> Nullable<Timestamp>,

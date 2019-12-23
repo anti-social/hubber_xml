@@ -396,7 +396,8 @@ fn convert_offer_to_product(offer: Offer) -> Option<models::NewProduct> {
         return None;
     };
     Some(models::NewProduct {
-        offer_id: offer.offer_id,
+        offer_id: offer.offer_id.clone(),
+        hub_stock_id: offer.offer_id.clone(),
         available: offer.available,
         categoryId: category_id,
         name,
@@ -423,20 +424,26 @@ fn sync_products_chunk(
     use schema::products::dsl::{products as products_table};
 
     let start_syncing_at = Instant::now();
+    let mut processed_products_stat = ProcessedProducts::default();
 
     let offer_ids = parsed_products.iter()
         .map(|p| p.offer_id.as_str())
         .collect::<Vec<_>>();
     let found_products = products_table
-        .filter(schema::products::offer_id.eq_any(offer_ids))
+        .filter(schema::products::hub_stock_id.eq_any(offer_ids))
         .load::<models::Product>(conn)?;
     let offer_id_to_found_product = found_products.iter()
-        .map(|p| (p.offer_id.as_str(), p))
+        .filter_map(|p| {
+            if let Some(ref hub_stock_id) = p.hub_stock_id {
+                Some((hub_stock_id.as_str(), p))
+            } else {
+                None
+            }
+        })
         .collect::<HashMap<_, _>>();
 
-    let mut processed_products_stat = ProcessedProducts::default();
     for p in parsed_products {
-        match offer_id_to_found_product.get(p.offer_id.as_str()) {
+        match offer_id_to_found_product.get(p.hub_stock_id.as_str()) {
             Some(found_product) => {
                 let mut should_update = false;
                 let mut update_product = models::ModProduct::default();
@@ -473,7 +480,9 @@ fn sync_products_chunk(
     }
 
     let insert_products = parsed_products.iter()
-        .filter(|&p| !offer_id_to_found_product.contains_key(p.offer_id.as_str()))
+        .filter(|&p| {
+            !offer_id_to_found_product.contains_key(p.hub_stock_id.as_str())
+        })
         .collect::<Vec<_>>();
     processed_products_stat.inserted += insert_products.len() as u32;
     if !insert_products.is_empty() {
