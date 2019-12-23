@@ -2,7 +2,7 @@ extern crate chrono;
 use chrono::prelude::*;
 
 #[macro_use] extern crate failure;
-use failure::Error;
+use failure::{Error, ResultExt};
 
 #[macro_use] extern crate diesel;
 use diesel::prelude::*;
@@ -24,6 +24,8 @@ use structopt::StructOpt;
 
 use quick_xml::Reader;
 use quick_xml::events::Event;
+
+use url::Url;
 
 mod models;
 mod schema;
@@ -69,7 +71,7 @@ fn main() -> Result<(), Error> {
 
     let opts = Opts::from_args();
 
-    let conn = establish_connection();
+    let conn = establish_mysql_connection()?;
 
     let stat = process_offers(&opts, &conn)?;
     println!("Total offers: {}", stat.total_offers);
@@ -96,16 +98,20 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-pub fn establish_connection() -> MysqlConnection {
+pub fn establish_mysql_connection() -> Result<MysqlConnection, Error> {
     dotenv::dotenv().ok();
 
     let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-    let conn = MysqlConnection::establish(&database_url)
-        .expect(&format!("Error connecting to {}", database_url));
-    info!("Successfully connected to {}", database_url);
+        .context("Environment variable DATABASE_URL must be set")?;
+    let mut safe_url = Url::parse(&database_url)
+        .context("Cannot parse DATABASE_URL environment variable")?;
+    safe_url.set_password(Some("******")).ok();
 
-    conn
+    let conn = MysqlConnection::establish(&database_url)
+        .context(format!("Error connecting to {}", &safe_url))?;
+    info!("Successfully connected to {}", &safe_url);
+
+    Ok(conn)
 }
 
 pub fn fetch_product() {
