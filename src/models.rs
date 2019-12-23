@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use super::schema::products;
 
 pub const AVAILABLE: i8 = 1;
