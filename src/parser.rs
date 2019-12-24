@@ -293,13 +293,15 @@ pub(crate) fn parse_offers(
     };
 
     if opts.mark_missing_unavailable {
+        let start_mark_missing_at = Instant::now();
         stat.marked_as_unavailable = mark_missing_as_unavailable(conn, &all_offer_ids, opts)?;
+        stat.mark_missing_duration = start_mark_missing_at.elapsed();
     }
 
     finilize_processing(conn, &date_processed)?;
 
     stat.total_duration = start_processing_at.elapsed();
-    stat.parse_duration = stat.total_duration - total_sync_duration;
+    stat.parse_duration = stat.total_duration - total_sync_duration - stat.mark_missing_duration;
 
     Ok(stat)
 }

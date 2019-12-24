@@ -60,6 +60,7 @@ struct ProcessedStat {
     pub marked_as_unavailable: u32,
     pub total_duration: Duration,
     pub parse_duration: Duration,
+    pub mark_missing_duration: Duration,
 }
 
 fn main() -> Result<(), Error> {
@@ -95,6 +96,9 @@ fn main() -> Result<(), Error> {
     }
     println!("Total time: {:?}", stat.total_duration);
     println!("Parse time: {:?}", stat.parse_duration);
+    if opts.mark_missing_unavailable {
+        println!("Mark missing time: {:?}", stat.mark_missing_duration);
+    }
 
     Ok(())
 }
