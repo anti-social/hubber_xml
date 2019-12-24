@@ -257,3 +257,11 @@ pub(crate) fn mark_missing_as_unavailable(
 
     Ok(marked_count)
 }
+
+pub(crate) fn finilize_processing(conn: &MysqlConnection, date_processing: &NaiveDateTime) -> Result<(), Error> {
+    // TODO: Create row if not exists
+    conn.batch_execute(&format!(
+        "UPDATE timestamps SET event_date='{}' WHERE event = 'hub_xml_update';", date_processing
+    ))?;
+    Ok(())
+}

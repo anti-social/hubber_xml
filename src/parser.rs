@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Utc, Timelike};
 
 use diesel::mysql::MysqlConnection;
 
@@ -17,7 +17,12 @@ use std::time::{Duration, Instant};
 
 use crate::{Opts, ProcessedStat};
 use crate::models::{AVAILABLE, NOT_AVAILABLE};
-use crate::process::{convert_offer_to_product, mark_missing_as_unavailable, sync_products_chunk};
+use crate::process::{
+    convert_offer_to_product,
+    finilize_processing,
+    mark_missing_as_unavailable,
+    sync_products_chunk
+};
 
 pub(crate) struct Offer {
     pub offer_id: String,
@@ -88,7 +93,7 @@ pub(crate) fn parse_offers(
     let mut products_bucket = vec!();
     let mut all_offer_ids = HashSet::new();
 
-    let date_modified = Utc::now().naive_utc();
+    let date_processed = Utc::now().naive_utc().with_nanosecond(0).unwrap();
 
     loop {
         match xml_reader.read_event(&mut buf) {
@@ -241,7 +246,7 @@ pub(crate) fn parse_offers(
                         }
                         if products_bucket.len() == 1000 {
                             let processed_products_stat = sync_products_chunk(
-                                conn, &products_bucket, opts, &date_modified
+                                conn, &products_bucket, opts, &date_processed
                             )?;
                             stat.updated_price += processed_products_stat.updated_price;
                             stat.updated_available += processed_products_stat.updated_available;
@@ -275,7 +280,7 @@ pub(crate) fn parse_offers(
 
     if !products_bucket.is_empty() {
         let processed_products_stat = sync_products_chunk(
-            conn, &products_bucket, opts, &date_modified
+            conn, &products_bucket, opts, &date_processed
         )?;
         stat.updated_price += processed_products_stat.updated_price;
         stat.updated_available += processed_products_stat.updated_available;
@@ -290,6 +295,8 @@ pub(crate) fn parse_offers(
     if opts.mark_missing_unavailable {
         stat.marked_as_unavailable = mark_missing_as_unavailable(conn, &all_offer_ids, opts)?;
     }
+
+    finilize_processing(conn, &date_processed)?;
 
     stat.total_duration = start_processing_at.elapsed();
     stat.parse_duration = stat.total_duration - total_sync_duration;
