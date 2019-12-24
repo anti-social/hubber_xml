@@ -73,7 +73,7 @@ pub(crate) fn parse_offers(
         let pb = ProgressBar::new(file_size);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) parsing file and updating products")
                 .progress_chars("#>-")
         );
         Some(pb)

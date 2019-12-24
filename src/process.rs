@@ -126,11 +126,11 @@ pub(crate) fn sync_products_chunk(
                     }
                     if let Some(currency_id) = update_product.currencyId {
                         raw_update_queries.push_str(
-                            &format!("`currencyId` = {}", optional_string_to_sql(currency_id))
+                            &format!("`currencyId` = {}, ", optional_string_to_sql(currency_id))
                         );
                     }
                     raw_update_queries.push_str(&format!(
-                        "`renew_date` = '{}' WHERE `id` = {};\n",
+                        "`renew_date` = '{}', `to_renew` = 1 WHERE `id` = {};\n",
                         &date_modified, found_product.id
                     ));
 
@@ -206,7 +206,7 @@ pub(crate) fn mark_missing_as_unavailable(
         let pb = ProgressBar::new(total_products);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:6} ({eta})")
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:6} ({eta}) searching missing products")
         );
         Some((pb, total_products / 100))
     } else {
