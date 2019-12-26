@@ -1,8 +1,12 @@
+use byteorder::{LittleEndian, ReadBytesExt};
+
 use chrono::{Utc, Timelike};
 
 use diesel::mysql::MysqlConnection;
 
 use failure::Error;
+
+use flate2::bufread::GzDecoder;
 
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -12,7 +16,10 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use std::collections::HashSet;
-use std::fs;
+use std::ffi::OsStr;
+use std::fs::{self, File};
+use std::io::{BufReader, SeekFrom};
+use std::io::prelude::*;
 use std::time::{Duration, Instant};
 
 use crate::{Opts, ProcessedStat};
@@ -66,13 +73,37 @@ enum OfferFields {
     VendorCode,
 }
 
+fn get_gzip_file_uncompressed_size(file: &mut File) -> Result<u32, Error> {
+    let orig_position = file.seek(SeekFrom::Current(0))?;
+    file.seek(SeekFrom::End(-4))?;
+    let size = file.read_u32::<LittleEndian>()?;
+    file.seek(SeekFrom::Start(orig_position))?;
+    return Ok(size);
+}
+
 pub(crate) fn parse_offers(
     opts: &Opts, conn: &MysqlConnection,
 ) -> Result<ProcessedStat, Error> {
     let start_processing_at = Instant::now();
     let mut total_sync_duration = Duration::default();
     let file_path = opts.file_path.as_path();
-    let file_size = fs::metadata(file_path)?.len();
+    let mut _reader: BufReader<File>;
+    let mut _gz_decoder: BufReader<GzDecoder<BufReader<File>>>;
+    let file_size: u64;
+    let reader: &mut dyn BufRead = match file_path.extension() {
+        Some(ext) if ext == OsStr::new("gz") => {
+            let mut file = File::open(file_path)?;
+            file_size = get_gzip_file_uncompressed_size(&mut file)? as u64;
+            _gz_decoder = BufReader::new(GzDecoder::new(BufReader::new(file)));
+            &mut _gz_decoder
+        }
+        _ => {
+            file_size = fs::metadata(file_path)?.len();
+            _reader = BufReader::new(File::open(file_path)?);
+            &mut _reader
+        }
+    };
+
     let update_progress_after_chunk = file_size / 100;
     let progress_bar = if !opts.no_progress {
         let pb = ProgressBar::new(file_size);
@@ -85,7 +116,8 @@ pub(crate) fn parse_offers(
     } else {
         None
     };
-    let mut xml_reader = Reader::from_file(file_path)?;
+
+    let mut xml_reader = Reader::from_reader(reader);
     let mut buf = vec!();
     let mut offer_buf = vec!();
     let mut stat = ProcessedStat::default();
