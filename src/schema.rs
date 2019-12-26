@@ -12,6 +12,7 @@ table! {
         description -> Nullable<Mediumtext>,
 //        vendorCode -> Nullable<Integer>,
         renew_date -> Nullable<Timestamp>,
+        file_id -> Nullable<Tinyint>,
 //        insert_date -> Nullable<Timestamp>,
 //        group_id -> Nullable<Varchar>,
 //        prom_cat_id -> Nullable<Integer>,

@@ -4,6 +4,8 @@ use super::schema::products;
 pub const AVAILABLE: i8 = 1;
 pub const NOT_AVAILABLE: i8 = 0;
 
+pub const HUBBER_FILE_ID: i8 = 1;
+
 #[derive(Insertable)]
 #[table_name="products"]
 pub struct NewProduct {
@@ -16,6 +18,7 @@ pub struct NewProduct {
     pub currencyId: Option<String>,
     pub available: i8,
     pub description: Option<String>,
+    pub file_id: Option<i8>,
 }
 
 #[derive(Queryable, Debug)]
@@ -31,6 +34,7 @@ pub struct Product {
     pub available: Option<i8>,
     pub description: Option<String>,
     pub renew_data: Option<chrono::NaiveDateTime>,
+    pub file_id: Option<i8>,
 }
 
 //#[derive(QueryableByName)]

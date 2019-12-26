@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::{CHUNK_SIZE, Opts};
-use crate::models::{self, AVAILABLE, NOT_AVAILABLE};
+use crate::models::{self, AVAILABLE, NOT_AVAILABLE, HUBBER_FILE_ID};
 use crate::parser::Offer;
 use crate::schema::{self, products};
 
@@ -43,6 +43,7 @@ pub(crate) fn convert_offer_to_product(offer: Offer) -> Option<models::NewProduc
         oldprice: offer.old_price,
         currencyId: offer.currency_id,
         description: offer.description,
+        file_id: Some(HUBBER_FILE_ID),
     })
 }
 
@@ -237,7 +238,10 @@ pub(crate) fn mark_missing_as_unavailable(
             }
         }
         if !missing_offer_ids.is_empty() {
-            diesel::update(dsl::products.filter(dsl::hub_stock_id.eq_any(&missing_offer_ids)))
+            diesel::update(dsl::products.filter(
+                dsl::hub_stock_id.eq_any(&missing_offer_ids)
+                    .and(dsl::file_id.eq(HUBBER_FILE_ID))
+            ))
                 .set(dsl::available.eq(NOT_AVAILABLE))
                 .execute(conn)?;
             marked_count += missing_offer_ids.len() as u32;
