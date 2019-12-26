@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "hubber_xml"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
